@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>netscout</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>🛰️ netscout</h1>
+    <div class="controls">
+      <input id="cidr" type="text" placeholder="192.168.1.0/24 (blank = auto)" />
+      <button id="run-btn">Run scan</button>
+      <button id="diff-btn" class="secondary">Compare with previous</button>
+    </div>
+    <p id="status" class="status"></p>
+  </header>
+
+  <main>
+    <section id="history-section">
+      <h2>Scan history</h2>
+      <ul id="history" class="history"></ul>
+    </section>
+
+    <section id="detail-section" hidden>
+      <h2 id="detail-title"></h2>
+      <table class="hosts">
+        <thead>
+          <tr><th>IP</th><th>Hostname</th><th>Status</th><th>Open ports</th></tr>
+        </thead>
+        <tbody id="hosts-body"></tbody>
+      </table>
+    </section>
+
+    <section id="diff-section" hidden>
+      <h2>Changes since previous scan</h2>
+      <div id="diff-body"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
