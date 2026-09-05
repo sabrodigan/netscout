@@ -33,7 +33,7 @@ func main() {
 	}
 	r.PathPrefix("/").Handler(http.FileServer(http.FS(static)))
 
-	const addr = "127.0.0.1:8092"
+	const addr = "0.0.0.0:8092"
 	log.Printf("netscout listening on http://%s", addr)
 	log.Fatal(http.ListenAndServe(addr, r))
 }
