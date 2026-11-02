@@ -31,9 +31,9 @@ Click **Run scan** (leave the CIDR box blank to auto-detect your local `/24`), t
 | Variable | Default | Purpose |
 |---|---|---|
 | `MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection string |
+| `LISTEN_ADDR` | `127.0.0.1:8092` | HTTP listen address (use `0.0.0.0:8092` for LAN access — there is no login) |
 
-The server listens on `127.0.0.1:8092`. Data is stored in the `netscout` database,
-`scans` collection.
+Data is stored in the `netscout` database, `scans` collection.
 
 Default probed ports: `21, 22, 23, 25, 80, 139, 443, 445, 3306, 3389, 5432, 8080`.
 
@@ -43,6 +43,7 @@ Default probed ports: `21, 22, 23, 25, 80, 139, 443, 445, 3306, 3389, 5432, 8080
 |---|---|---|
 | POST | `/api/scans` | Run + store a scan. Optional body: `{"cidr":"192.168.1.0/24","ports":[22,80]}` |
 | GET | `/api/scans` | List scan summaries, newest first |
+| GET | `/api/scans/progress` | Progress of the scan currently running, if any |
 | GET | `/api/scans/{id}` | Full scan document |
 | GET | `/api/scans/latest` | Most recent scan |
 | GET | `/api/scans/latest-diff` | Diff the two most recent scans |
@@ -62,7 +63,10 @@ Such a host will read as absent. Widen the port list per scan if you need more c
 
 ## Limitations & scope
 
-- IPv4 only; scans a single CIDR per run.
+- IPv4 only; scans a single CIDR per run, and one scan at a time.
+- Targets must be private (`10/8`, `172.16/12`, `192.168/16`), loopback, or link-local ranges.
+- Each scan is capped at 65,536 probes (addresses × ports), e.g. a `/24` with up to 256 ports,
+  or a `/16` with one port. Ports must be 1–65535, at most 1,024 per scan.
 - TCP connect scanning is slower and less complete than raw-socket tools, but needs no
   privileges.
 - **Only scan networks you own or are explicitly authorized to assess.**

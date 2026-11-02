@@ -25,7 +25,15 @@ var defaultPorts = []int{21, 22, 23, 25, 80, 139, 443, 445, 3306, 3389, 5432, 80
 const (
 	dialTimeout = 800 * time.Millisecond // per-port connect timeout
 	scanWorkers = 128                    // concurrent host probes
+
+	// maxProbes caps addresses × ports per scan, bounding both memory and
+	// worst-case duration (~7 minutes when every probe times out).
+	maxProbes = 1 << 16
+	maxPorts  = 1024
 )
+
+// errScanInProgress is returned by runScan when another scan is still running.
+var errScanInProgress = errors.New("a scan is already in progress")
 
 // runScan probes every usable address in cidr against ports and returns a
 // populated Scan. A host is considered "up" if any probed port either accepts
@@ -35,16 +43,25 @@ func runScan(cidr string, ports []int) (*Scan, error) {
 	if len(ports) == 0 {
 		ports = defaultPorts
 	}
+	ports, err := normalizePorts(ports)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateTarget(cidr, len(ports)); err != nil {
+		return nil, err
+	}
 	addrs, err := hostsInCIDR(cidr)
 	if err != nil {
 		return nil, err
 	}
 
+	if !globalScanActive.CompareAndSwap(false, true) {
+		return nil, errScanInProgress
+	}
+	defer globalScanActive.Store(false)
 	globalScanTotal.Store(int32(len(addrs)))
 	globalScanScanned.Store(0)
 	globalScanUp.Store(0)
-	globalScanActive.Store(true)
-	defer globalScanActive.Store(false)
 
 	started := time.Now()
 
@@ -153,6 +170,51 @@ func isConnRefused(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "refused")
 }
 
+// normalizePorts rejects out-of-range ports and returns the list sorted and
+// de-duplicated.
+func normalizePorts(ports []int) ([]int, error) {
+	seen := make(map[int]bool, len(ports))
+	out := make([]int, 0, len(ports))
+	for _, p := range ports {
+		if p < 1 || p > 65535 {
+			return nil, fmt.Errorf("invalid port %d: must be 1-65535", p)
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	if len(out) > maxPorts {
+		return nil, fmt.Errorf("too many ports (%d): at most %d per scan", len(out), maxPorts)
+	}
+	sort.Ints(out)
+	return out, nil
+}
+
+// validateTarget restricts scans to private, loopback, or link-local IPv4
+// ranges and enforces the maxProbes budget before any addresses are enumerated.
+func validateTarget(cidr string, portCount int) error {
+	_, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return fmt.Errorf("invalid CIDR %q: %w", cidr, err)
+	}
+	network := ipnet.IP.To4()
+	if network == nil {
+		return errors.New("only IPv4 CIDR ranges are supported")
+	}
+	ones, bits := ipnet.Mask.Size()
+	// Every private block is aligned and at least a /16, so once the size is
+	// capped below that, a private first address means the whole range is private.
+	hosts := 1 << (bits - ones)
+	if hosts*portCount > maxProbes {
+		return fmt.Errorf("scan too large: %d addresses × %d ports exceeds %d probes", hosts, portCount, maxProbes)
+	}
+	if !network.IsPrivate() && !network.IsLoopback() && !network.IsLinkLocalUnicast() {
+		return fmt.Errorf("refusing to scan %s: only private, loopback, or link-local ranges are allowed", ipnet)
+	}
+	return nil
+}
+
 // hostsInCIDR returns every usable host address in cidr, skipping the network
 // and broadcast addresses for IPv4 blocks smaller than /31.
 func hostsInCIDR(cidr string) ([]string, error) {
@@ -204,7 +266,8 @@ func ipLess(a, b string) bool {
 }
 
 // localCIDR derives the primary non-loopback IPv4 network (e.g. 192.168.1.0/24)
-// for use as the default scan target. Returns "" if none can be determined.
+// for use as the default scan target, narrowed to the host's own /24 when the
+// interface network is wider. Returns "" if none can be determined.
 func localCIDR() string {
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -223,7 +286,11 @@ func localCIDR() string {
 			if !ok || ipnet.IP.To4() == nil {
 				continue
 			}
-			return (&net.IPNet{IP: ipnet.IP.Mask(ipnet.Mask), Mask: ipnet.Mask}).String()
+			mask := ipnet.Mask
+			if ones, _ := mask.Size(); ones < 24 {
+				mask = net.CIDRMask(24, 32)
+			}
+			return (&net.IPNet{IP: ipnet.IP.Mask(mask), Mask: mask}).String()
 		}
 	}
 	return ""

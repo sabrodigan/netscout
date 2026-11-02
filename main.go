@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -33,7 +35,19 @@ func main() {
 	}
 	r.PathPrefix("/").Handler(http.FileServer(http.FS(static)))
 
-	const addr = "0.0.0.0:8092"
+	addr := os.Getenv("LISTEN_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:8092"
+	}
+	// No WriteTimeout: POST /api/scans holds the response open for the whole
+	// scan, which can take several minutes at the maxProbes budget.
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	log.Printf("netscout listening on http://%s", addr)
-	log.Fatal(http.ListenAndServe(addr, r))
+	log.Fatal(srv.ListenAndServe())
 }

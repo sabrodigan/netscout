@@ -14,13 +14,14 @@ hosts, stores every scan as an immutable MongoDB document, and diffs the two mos
 go build -o netscout .   # build (embeds web/ into the binary via //go:embed)
 ./netscout               # run; serves http://127.0.0.1:8092, needs MongoDB reachable
 go vet ./...             # static checks
-go test ./...            # no tests exist yet — this reports "no test files"
+go test ./...            # unit tests for scanner validation (no MongoDB needed)
 ```
 
 There is no lint config beyond `go vet`. `MONGO_URI` overrides the Mongo connection
-(default `mongodb://localhost:27017`). The listen address `127.0.0.1:8092` is hardcoded in
-`main.go`. Rebuild after editing anything under `web/` — assets are embedded at compile time,
-not served from disk.
+(default `mongodb://localhost:27017`). `LISTEN_ADDR` overrides the listen address (default
+`127.0.0.1:8092`; set `0.0.0.0:8092` for LAN access — there is no auth, so anyone who can reach
+the port can trigger scans). Rebuild after editing anything under `web/` — assets are embedded
+at compile time, not served from disk. The built `netscout` binary is gitignored.
 
 ## Architecture
 
@@ -31,8 +32,14 @@ handlers in `handlers.go` call into the scanner and DB layers, and results seria
   (jobs channel in, `Host` results channel out). A host counts as **up** if any probed port either
   accepts the connection *or* refuses it with a RST (`isConnRefused`) — a refusal still proves the
   host is alive, so a host silent on every port reads as absent. `localCIDR` auto-derives the
-  primary non-loopback /24 when a scan request omits the CIDR. Pure-Go helpers (`hostsInCIDR`,
-  `nextIP`, `ipLess`) handle IPv4 address math; IPv6 is explicitly rejected.
+  primary non-loopback network (narrowed to a /24) when a scan request omits the CIDR. Pure-Go
+  helpers (`hostsInCIDR`, `nextIP`, `ipLess`) handle IPv4 address math; IPv6 is explicitly rejected.
+- **Scan guards** (`scanner.go`) — `validateTarget` runs before any address is enumerated: only
+  private, loopback, or link-local IPv4 ranges are allowed, and addresses × ports must fit the
+  `maxProbes` budget (65,536). `normalizePorts` rejects ports outside 1–65535, de-duplicates,
+  and caps the list at `maxPorts`. Only one scan runs at a time: `globalScanActive` is claimed
+  with a compare-and-swap, and a second request gets `errScanInProgress` (HTTP 409). The
+  `globalScan*` atomics also back the `/api/scans/progress` endpoint.
 - **`db.go`** — package-level `client`/`db`/`scanCol` globals set by `InitDB()` (called once from
   `main`). Database `netscout`, collection `scans`, with a descending index on `finished_at` so
   "latest" lookups are cheap.
@@ -56,8 +63,9 @@ and `/scans/latest-diff` paths so those aren't captured as an id.
 
 | Method | Path | Handler |
 |---|---|---|
-| POST | `/api/scans` | `createScanHandler` — optional body `{"cidr":..., "ports":[...]}` |
+| POST | `/api/scans` | `createScanHandler` — optional body `{"cidr":..., "ports":[...]}`; 409 if a scan is running |
 | GET | `/api/scans` | `listScansHandler` (summaries) |
+| GET | `/api/scans/progress` | `scanProgressHandler` — live counts for the active scan |
 | GET | `/api/scans/latest` | `latestScanHandler` |
 | GET | `/api/scans/latest-diff` | `latestDiffHandler` |
 | GET | `/api/scans/compare?from=&to=` | `compareScansHandler` |
@@ -65,6 +73,5 @@ and `/scans/latest-diff` paths so those aren't captured as an id.
 
 ## Repo note
 
-This project lives under a larger `goProjects` git repository (the git root is `goProjects/`, not
-this directory) that also contains unrelated sibling projects. Scope commits and changes to
-`src/netscout/` unless told otherwise.
+This directory is its own git repository (`github.com/sabrodigan/netscout`). `.devtools/` holds
+local MongoDB data and logs and is gitignored.

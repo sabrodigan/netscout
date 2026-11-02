@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -33,8 +35,10 @@ func createScanHandler(w http.ResponseWriter, r *http.Request) {
 		CIDR  string `json:"cidr"`
 		Ports []int  `json:"ports"`
 	}
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req) // body is optional
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		httpError(w, http.StatusBadRequest, "invalid request body")
+		return
 	}
 
 	if req.CIDR == "" {
@@ -47,6 +51,10 @@ func createScanHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Starting scan of %s", req.CIDR)
 	scan, err := runScan(req.CIDR, req.Ports)
+	if errors.Is(err, errScanInProgress) {
+		httpError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
