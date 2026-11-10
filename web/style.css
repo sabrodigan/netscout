@@ -73,6 +73,8 @@ main { padding: 1.5rem 2rem; display: flex; flex-direction: column; gap: 2rem; }
   gap: 1rem;
 }
 .history li:hover { border-color: var(--accent); }
+.places li { cursor: default; }
+.places li:hover { border-color: var(--border); }
 .history .meta { color: var(--muted); font-size: 0.85rem; }
 .badge {
   background: var(--panel-2);

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -25,6 +26,9 @@ var defaultPorts = []int{21, 22, 23, 25, 80, 139, 443, 445, 3306, 3389, 5432, 80
 const (
 	dialTimeout = 800 * time.Millisecond // per-port connect timeout
 	scanWorkers = 128                    // concurrent host probes
+	nameWorkers = 16                     // concurrent hostname lookups
+	dnsTimeout  = 3 * time.Second        // per-server PTR lookup timeout
+	mdnsTimeout = time.Second            // unicast mDNS query timeout
 
 	// maxProbes caps addresses × ports per scan, bounding both memory and
 	// worst-case duration (~7 minutes when every probe times out).
@@ -38,7 +42,7 @@ var errScanInProgress = errors.New("a scan is already in progress")
 // runScan probes every usable address in cidr against ports and returns a
 // populated Scan. A host is considered "up" if any probed port either accepts
 // the connection (open) or actively refuses it (RST) — a refusal still proves
-// the host is alive. Reverse DNS is attempted for every up host.
+// the host is alive. Hostnames are resolved for every up host once probing ends.
 func runScan(cidr string, ports []int) (*Scan, error) {
 	if len(ports) == 0 {
 		ports = defaultPorts
@@ -103,6 +107,7 @@ func runScan(cidr string, ports []int) (*Scan, error) {
 	sort.Slice(hosts, func(i, j int) bool {
 		return ipLess(hosts[i].IP, hosts[j].IP)
 	})
+	resolveHostnames(hosts, dnsServers(os.Getenv("DNS_SERVERS")))
 
 	scan := &Scan{
 		CIDR:       cidr,
@@ -145,15 +150,94 @@ func probeHost(ip string, ports []int) (Host, bool) {
 	if h.OpenPorts == nil {
 		h.OpenPorts = []int{}
 	}
-	h.Hostname = reverseDNS(ip)
 	return h, true
 }
 
-// reverseDNS returns the first PTR name for ip (trailing dot trimmed), or "".
-func reverseDNS(ip string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+// resolveHostnames fills in Hostname for every host. It runs after probing
+// with its own small pool: the system resolver may sit behind several
+// forwarding hops (e.g. a VM's NAT DNS proxy) that drop answers when flooded.
+func resolveHostnames(hosts []Host, servers []*net.Resolver) {
+	sem := make(chan struct{}, nameWorkers)
+	var wg sync.WaitGroup
+	for i := range hosts {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(h *Host) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			h.Hostname = lookupHostname(h.IP, servers)
+		}(&hosts[i])
+	}
+	wg.Wait()
+}
+
+// lookupHostname asks the host for the name it currently announces, then falls
+// back to DNS. A router keeps the DHCP name from the previous operating system
+// on that address, so its answer must not hide a renamed machine.
+func lookupHostname(ip string, servers []*net.Resolver) string {
+	announced := reverseDNS(resolverAt(net.JoinHostPort(ip, "5353")), ip, mdnsTimeout)
+	resolved := ""
+	if announced == "" {
+		resolved = reverseDNS(net.DefaultResolver, ip, dnsTimeout)
+		if resolved == "" {
+			for _, r := range servers {
+				if resolved = reverseDNS(r, ip, dnsTimeout); resolved != "" {
+					break
+				}
+			}
+		}
+	}
+	return deviceHostname(announced, resolved)
+}
+
+// deviceHostname prefers the name the host announced. The mDNS suffix is not
+// part of the hostname the machine was given.
+func deviceHostname(announced, resolved string) string {
+	name := strings.TrimSuffix(strings.TrimSpace(announced), ".")
+	if strings.HasSuffix(strings.ToLower(name), ".local") {
+		name = strings.TrimSpace(name[:len(name)-len(".local")])
+	}
+	if name != "" {
+		return name
+	}
+	return strings.TrimSuffix(strings.TrimSpace(resolved), ".")
+}
+
+// dnsServers parses a comma-separated list of DNS servers ("192.168.1.1" or
+// "192.168.1.1:53") into resolvers. Invalid entries are skipped.
+func dnsServers(list string) []*net.Resolver {
+	var out []*net.Resolver
+	for _, s := range strings.Split(list, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, _, err := net.SplitHostPort(s); err != nil {
+			s = net.JoinHostPort(s, "53")
+		}
+		if host, _, _ := net.SplitHostPort(s); net.ParseIP(host) == nil {
+			continue
+		}
+		out = append(out, resolverAt(s))
+	}
+	return out
+}
+
+// resolverAt returns a pure-Go resolver that sends every query to addr.
+func resolverAt(addr string) *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, addr)
+		},
+	}
+}
+
+// reverseDNS returns the first PTR name for ip via r (trailing dot trimmed), or "".
+func reverseDNS(r *net.Resolver, ip string, timeout time.Duration) string {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	var r net.Resolver
 	names, err := r.LookupAddr(ctx, ip)
 	if err != nil || len(names) == 0 {
 		return ""

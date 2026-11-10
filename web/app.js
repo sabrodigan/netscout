@@ -25,6 +25,47 @@ function ports(list) {
   return list && list.length ? list.join(", ") : "—";
 }
 
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[ch]));
+}
+
+let placesByIP = {};
+
+async function loadPlaces() {
+  const list = await api("GET", "/api/places");
+  placesByIP = {};
+  const ul = $("places");
+  ul.replaceChildren();
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "No Pi locations saved yet. Enter where a Pi lives in pilocate.";
+    ul.append(li);
+    return;
+  }
+  for (const item of list) {
+    if (item.place) placesByIP[item.ip] = item.place;
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = `${item.hostname || item.ip} · ${item.ip}`;
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = item.place;
+    li.append(name, badge);
+    ul.append(li);
+  }
+}
+
+function where(ip) {
+  return placesByIP[ip] || "—";
+}
+
 async function runScan() {
   const cidr = $("cidr").value.trim();
   $("run-btn").disabled = true;
@@ -45,6 +86,7 @@ async function runScan() {
   try {
     const scan = await api("POST", "/api/scans", cidr ? { cidr } : {});
     setStatus(`Scan complete: ${scan.hostCount} host(s) up on ${scan.cidr}.`);
+    await loadPlaces().catch(() => {});
     await loadHistory();
     showScan(scan);
   } catch (e) {
@@ -80,23 +122,29 @@ async function loadHistory() {
   }
 }
 
-function showScan(scan) {
+async function showScan(scan) {
+  try {
+    await loadPlaces();
+  } catch (e) {
+    // The host list still renders when pilocate cannot be read.
+  }
   $("diff-section").hidden = true;
   $("detail-section").hidden = false;
   $("detail-title").textContent = `Hosts on ${scan.cidr} — ${fmtTime(scan.finishedAt)}`;
   const body = $("hosts-body");
   body.innerHTML = "";
   if (!scan.hosts || !scan.hosts.length) {
-    body.innerHTML = '<tr><td colspan="4" class="empty">No hosts responded.</td></tr>';
+    body.innerHTML = '<tr><td colspan="5" class="empty">No hosts responded.</td></tr>';
     return;
   }
   for (const h of scan.hosts) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><code>${h.ip}</code></td>
-      <td>${h.hostname || "—"}</td>
-      <td>${h.status}</td>
-      <td>${ports(h.openPorts)}</td>`;
+      <td><code>${esc(h.ip)}</code></td>
+      <td>${esc(h.hostname || "—")}</td>
+      <td>${esc(where(h.ip))}</td>
+      <td>${esc(h.status)}</td>
+      <td>${esc(ports(h.openPorts))}</td>`;
     body.appendChild(tr);
   }
 }
@@ -104,6 +152,7 @@ function showScan(scan) {
 async function showLatestDiff() {
   $("detail-section").hidden = true;
   try {
+    await loadPlaces();
     const diff = await api("GET", "/api/scans/latest-diff");
     renderDiff(diff);
     setStatus("");
@@ -129,18 +178,22 @@ function renderDiff(diff) {
   };
 
   group("🟢 New hosts", "added", diff.added, (h) =>
-    `<span class="ip">${h.ip}</span> <span class="detail">${h.hostname || ""} — ports: ${ports(h.openPorts)}</span>`);
+    `<span class="ip">${esc(h.ip)}</span> <span class="detail">${esc(h.hostname || "")} ${esc(where(h.ip) === "—" ? "" : "· " + where(h.ip))} — ports: ${esc(ports(h.openPorts))}</span>`);
   group("🔴 Disappeared hosts", "removed", diff.removed, (h) =>
-    `<span class="ip">${h.ip}</span> <span class="detail">${h.hostname || ""}</span>`);
+    `<span class="ip">${esc(h.ip)}</span> <span class="detail">${esc(h.hostname || "")} ${esc(where(h.ip) === "—" ? "" : "· " + where(h.ip))}</span>`);
   group("🟡 Changed hosts", "changed", diff.changed, (c) => {
     const bits = [];
+    if ((c.fromHostname || "") !== (c.hostname || "")) bits.push(`name ${c.fromHostname || "—"} → ${c.hostname || "—"}`);
     if (c.addedPorts.length) bits.push(`+ports ${c.addedPorts.join(", ")}`);
     if (c.removedPorts.length) bits.push(`-ports ${c.removedPorts.join(", ")}`);
     if (c.fromStatus !== c.toStatus) bits.push(`${c.fromStatus} → ${c.toStatus}`);
-    return `<span class="ip">${c.ip}</span> <span class="detail">${c.hostname || ""} — ${bits.join("; ")}</span>`;
+    const lived = where(c.ip);
+    const place = lived === "—" ? "" : ` · ${lived}`;
+    return `<span class="ip">${esc(c.ip)}</span> <span class="detail">${esc(c.hostname || "")}${esc(place)} — ${esc(bits.join("; "))}</span>`;
   });
 }
 
 $("run-btn").onclick = runScan;
 $("diff-btn").onclick = showLatestDiff;
+loadPlaces().catch((e) => setStatus(e.message, true));
 loadHistory().catch((e) => setStatus(e.message, true));

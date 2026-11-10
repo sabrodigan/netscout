@@ -20,7 +20,9 @@ go test ./...            # unit tests for scanner validation (no MongoDB needed)
 There is no lint config beyond `go vet`. `MONGO_URI` overrides the Mongo connection
 (default `mongodb://localhost:27017`). `LISTEN_ADDR` overrides the listen address (default
 `127.0.0.1:8092`; set `0.0.0.0:8092` for LAN access — there is no auth, so anyone who can reach
-the port can trigger scans). Rebuild after editing anything under `web/` — assets are embedded
+the port can trigger scans). `DEFAULT_CIDR` sets the scan target used when a request omits the
+CIDR, taking precedence over `localCIDR` auto-detection. `DNS_SERVERS` (comma-separated) lists
+extra DNS servers tried for hostnames after the system resolver. Rebuild after editing anything under `web/` — assets are embedded
 at compile time, not served from disk. The built `netscout` binary is gitignored.
 
 ## Architecture

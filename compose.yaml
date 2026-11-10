@@ -1,0 +1,61 @@
+# Local development stack: netscout + MongoDB.
+#
+# netscout uses host networking so it scans (and auto-detects) your real LAN
+# rather than Docker's internal bridge subnet. That means it reaches MongoDB
+# through a loopback-published port instead of the Compose network.
+#
+# Development-only credential fallback: MONGO_PASSWORD defaults to
+# "netscout-dev". Override it in a .env file next to this one, e.g.
+#   MONGO_PASSWORD=something-else
+# MONGO_HOST_PORT defaults to 27018 to avoid clashing with a host mongod on 27017.
+
+services:
+  app:
+    build:
+      context: .
+      target: production
+    network_mode: host
+    environment:
+      # The house network can open the dashboard. There is no login, so UFW
+      # limits this port to 192.168.1.0/24. MongoDB stays on localhost.
+      LISTEN_ADDR: 0.0.0.0:8092
+      # Scan target when the CIDR box is blank. This host sits behind NAT, so
+      # auto-detect would pick the virtual network instead of the LAN.
+      DEFAULT_CIDR: ${DEFAULT_CIDR:-192.168.1.0/24}
+      # Extra DNS servers (comma-separated), used only when a host does not
+      # announce its own name. The router often keeps a name from an old install.
+      DNS_SERVERS: ${DNS_SERVERS:-192.168.1.1}
+      MONGO_URI: mongodb://netscout:${MONGO_PASSWORD:-netscout-dev}@127.0.0.1:${MONGO_HOST_PORT:-27018}/?authSource=admin
+      # Locations typed in pilocate live in the host MongoDB, not the scan database.
+      PILOCATE_MONGO_URI: mongodb://127.0.0.1:27017
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: rebuild
+          path: .
+          ignore:
+            - .devtools/
+            - netscout
+
+  mongo:
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: netscout
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-netscout-dev}
+    ports:
+      - "127.0.0.1:${MONGO_HOST_PORT:-27018}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mongo-data:

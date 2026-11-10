@@ -16,10 +16,12 @@ var webFS embed.FS
 
 func main() {
 	InitDB()
+	InitPlaces()
 
 	r := mux.NewRouter()
 
 	api := r.PathPrefix("/api").Subrouter()
+	api.HandleFunc("/places", listPlacesHandler).Methods("GET")
 	api.HandleFunc("/scans", createScanHandler).Methods("POST")
 	api.HandleFunc("/scans", listScansHandler).Methods("GET")
 	api.HandleFunc("/scans/progress", scanProgressHandler).Methods("GET")

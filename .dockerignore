@@ -1,0 +1,43 @@
+# Version control
+.git/
+.gitignore
+
+# Local MongoDB data/logs and the host-built binary
+.devtools/
+/netscout
+
+# IDE and editor files
+.vscode/
+.idea/
+.cursor/
+.claude/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+LICENSE
+
+# Docker files
+Dockerfile*
+compose*.yaml
+docker-compose*.yml
+docker-compose*.yaml
+.dockerignore
+
+# Environment and secrets
+**/.npmrc
+.env
+.env.*
+*.pem
+*.key
+
+# Go
+vendor/
+coverage.out
+*.test
+
+# OS files
+.DS_Store
+Thumbs.db

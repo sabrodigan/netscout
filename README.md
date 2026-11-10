@@ -4,7 +4,7 @@ A small Go web app that scans your local network for live hosts, stores every sc
 in MongoDB, and shows what changed between the two most recent scans.
 
 - **Pure-Go TCP connect scanning** — no `nmap`, no root/raw sockets required.
-- **Per host:** IP, up/down status, reverse-DNS hostname, open ports.
+- **Per host:** IP, up/down status, hostname (reverse DNS, then `DNS_SERVERS`, then unicast mDNS), open ports.
 - **Full history:** every scan is stored as its own document; nothing is overwritten.
 - **Comparison:** diff any two scans, or the latest vs. the previous one, showing hosts
   added, disappeared, and changed (port or status deltas).
@@ -23,6 +23,18 @@ go build -o netscout .
 
 Then open <http://127.0.0.1:8092>.
 
+### With Docker
+
+```bash
+docker compose up --build   # netscout + MongoDB; rebuild on edits with `docker compose watch`
+docker build --target test . # go vet + go test inside the build image
+```
+
+The app container uses host networking (Linux only) so it scans your real LAN. MongoDB
+runs in its own container, published on `127.0.0.1:27018`. Its password defaults to the
+development-only value `netscout-dev`; override it with `MONGO_PASSWORD` (and the port
+with `MONGO_HOST_PORT`) in a `.env` file.
+
 Click **Run scan** (leave the CIDR box blank to auto-detect your local `/24`), then
 **Run scan** again later and click **Compare with previous** to see what changed.
 
@@ -32,6 +44,8 @@ Click **Run scan** (leave the CIDR box blank to auto-detect your local `/24`), t
 |---|---|---|
 | `MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection string |
 | `LISTEN_ADDR` | `127.0.0.1:8092` | HTTP listen address (use `0.0.0.0:8092` for LAN access — there is no login) |
+| `DEFAULT_CIDR` | auto-detected local `/24` | Scan target when a request omits `cidr` (`192.168.1.0/24` in `compose.yaml`) |
+| `DNS_SERVERS` | none | Comma-separated DNS servers tried for hostnames after the system resolver (`192.168.1.1` in `compose.yaml`) |
 
 Data is stored in the `netscout` database, `scans` collection.
 

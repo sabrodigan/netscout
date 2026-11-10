@@ -39,6 +39,7 @@ type ScanSummary struct {
 type HostChange struct {
 	IP           string `json:"ip"`
 	Hostname     string `json:"hostname,omitempty"`
+	FromHostname string `json:"fromHostname,omitempty"`
 	FromStatus   string `json:"fromStatus"`
 	ToStatus     string `json:"toStatus"`
 	AddedPorts   []int  `json:"addedPorts"`

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -29,7 +30,7 @@ func httpError(w http.ResponseWriter, status int, msg string) {
 
 // createScanHandler runs a new scan and stores it. Optional JSON body:
 // {"cidr": "192.168.1.0/24", "ports": [22,80,443]}. Missing fields fall back
-// to the local /24 and the default port set.
+// to DEFAULT_CIDR (or the local /24 if unset) and the default port set.
 func createScanHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		CIDR  string `json:"cidr"`
@@ -41,6 +42,9 @@ func createScanHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.CIDR == "" {
+		req.CIDR = os.Getenv("DEFAULT_CIDR")
+	}
 	if req.CIDR == "" {
 		req.CIDR = localCIDR()
 		if req.CIDR == "" {
@@ -178,6 +182,18 @@ func findLatestScans(n int64) ([]*Scan, error) {
 		return nil, err
 	}
 	return scans, nil
+}
+
+// listPlacesHandler returns locations saved in pilocate, for the hosts in a scan.
+func listPlacesHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	places, err := loadPlaces(ctx)
+	if err != nil {
+		httpError(w, http.StatusServiceUnavailable, "Pi locations are not available")
+		return
+	}
+	jsonResponse(w, http.StatusOK, places)
 }
 
 // scanProgressHandler returns the progress of the currently active scan, if any.

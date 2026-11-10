@@ -24,10 +24,11 @@ func diffScans(from, to *Scan) ScanDiff {
 			continue
 		}
 		added, removed := portDelta(fh.OpenPorts, th.OpenPorts)
-		if len(added) > 0 || len(removed) > 0 || fh.Status != th.Status {
+		if len(added) > 0 || len(removed) > 0 || fh.Status != th.Status || fh.Hostname != th.Hostname {
 			diff.Changed = append(diff.Changed, HostChange{
 				IP:           ip,
 				Hostname:     th.Hostname,
+				FromHostname: fh.Hostname,
 				FromStatus:   fh.Status,
 				ToStatus:     th.Status,
 				AddedPorts:   added,

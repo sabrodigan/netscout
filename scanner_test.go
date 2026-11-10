@@ -75,6 +75,50 @@ func TestHostsInCIDR(t *testing.T) {
 	}
 }
 
+func TestDeviceHostnamePrefersTheNameTheHostAnnounces(t *testing.T) {
+	if got := deviceHostname("ras-4b8gb.local", "raspberrypi8gb.vodafone.ultrahub"); got != "ras-4b8gb" {
+		t.Errorf("deviceHostname kept the router name %q", got)
+	}
+	if got := deviceHostname("ras-4b.local.", "storm-ras4b.vodafone.ultrahub"); got != "ras-4b" {
+		t.Errorf("deviceHostname = %q, want ras-4b", got)
+	}
+	if got := deviceHostname("", "ras5-AI-2.vodafone.ultrahub."); got != "ras5-AI-2.vodafone.ultrahub" {
+		t.Errorf("deviceHostname dropped the DNS fallback %q", got)
+	}
+	if got := deviceHostname("  ", ""); got != "" {
+		t.Errorf("deviceHostname = %q, want empty", got)
+	}
+}
+
+func TestDiffReportsRename(t *testing.T) {
+	from := &Scan{Hosts: []Host{{IP: "192.168.1.64", Status: "up", Hostname: "raspberrypi8gb", OpenPorts: []int{22}}}}
+	to := &Scan{Hosts: []Host{{IP: "192.168.1.64", Status: "up", Hostname: "ras-4b8gb", OpenPorts: []int{22}}}}
+	diff := diffScans(from, to)
+	if len(diff.Changed) != 1 {
+		t.Fatalf("changed = %d, want 1", len(diff.Changed))
+	}
+	if diff.Changed[0].FromHostname != "raspberrypi8gb" || diff.Changed[0].Hostname != "ras-4b8gb" {
+		t.Errorf("rename = %q → %q", diff.Changed[0].FromHostname, diff.Changed[0].Hostname)
+	}
+}
+
+func TestDNSServers(t *testing.T) {
+	tests := []struct {
+		list string
+		want int
+	}{
+		{"", 0},
+		{"192.168.1.1", 1},
+		{"192.168.1.1:53, 10.0.0.1 ,", 2},
+		{"not-an-ip,192.168.1.1", 1},
+	}
+	for _, tt := range tests {
+		if got := len(dnsServers(tt.list)); got != tt.want {
+			t.Errorf("dnsServers(%q) returned %d resolvers, want %d", tt.list, got, tt.want)
+		}
+	}
+}
+
 func TestRunScanRejectsConcurrentScans(t *testing.T) {
 	globalScanActive.Store(true)
 	defer globalScanActive.Store(false)
