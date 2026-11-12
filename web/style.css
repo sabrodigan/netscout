@@ -21,6 +21,7 @@ body {
   line-height: 1.5;
 }
 
+.credit { margin: 0 0 0.35rem; color: var(--muted); font-size: 0.85rem; }
 header {
   padding: 1.5rem 2rem;
   border-bottom: 1px solid var(--border);
