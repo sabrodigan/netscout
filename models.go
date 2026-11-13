@@ -16,6 +16,8 @@ type Host struct {
 
 // Scan is one run of the network scanner, with its hosts embedded.
 // Every run is inserted as a new document so history is retained in full.
+// The main screen lists the newest visibleScans; older documents stay stored
+// and are read back from the archive.
 type Scan struct {
 	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
 	CIDR       string             `bson:"cidr" json:"cidr"`

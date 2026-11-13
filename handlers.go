@@ -28,6 +28,10 @@ func httpError(w http.ResponseWriter, status int, msg string) {
 	jsonResponse(w, status, map[string]string{"error": msg})
 }
 
+// visibleScans is how many scans the main screen lists. Older scans stay in
+// the same collection and are returned by the archive list.
+const visibleScans int64 = 10
+
 // createScanHandler runs a new scan and stores it. Optional JSON body:
 // {"cidr": "192.168.1.0/24", "ports": [22,80,443]}. Missing fields fall back
 // to DEFAULT_CIDR (or the local /24 if unset) and the default port set.
@@ -73,26 +77,49 @@ func createScanHandler(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusCreated, scan)
 }
 
-// listScansHandler returns scan summaries, newest first.
+// listScansHandler returns the newest visibleScans summaries for the main screen.
 func listScansHandler(w http.ResponseWriter, r *http.Request) {
-	opts := options.Find().
-		SetSort(bson.D{{Key: "finished_at", Value: -1}}).
-		SetProjection(bson.D{{Key: "hosts", Value: 0}, {Key: "ports", Value: 0}})
-
-	cursor, err := scanCol.Find(context.Background(), bson.M{}, opts)
+	scans, err := listScanSummaries(0, visibleScans)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "failed to list scans")
 		return
 	}
+	jsonResponse(w, http.StatusOK, scans)
+}
+
+// listArchivedScansHandler returns summaries older than the main-screen window,
+// newest first, so an earlier scan can be opened without listing it there.
+func listArchivedScansHandler(w http.ResponseWriter, r *http.Request) {
+	scans, err := listScanSummaries(visibleScans, 0)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "failed to list archived scans")
+		return
+	}
+	jsonResponse(w, http.StatusOK, scans)
+}
+
+func listScanSummaries(skip, limit int64) ([]ScanSummary, error) {
+	opts := options.Find().
+		SetSort(bson.D{{Key: "finished_at", Value: -1}, {Key: "_id", Value: -1}}).
+		SetProjection(bson.D{{Key: "hosts", Value: 0}, {Key: "ports", Value: 0}})
+	if skip > 0 {
+		opts.SetSkip(skip)
+	}
+	if limit > 0 {
+		opts.SetLimit(limit)
+	}
+	cursor, err := scanCol.Find(context.Background(), bson.M{}, opts)
+	if err != nil {
+		return nil, err
+	}
 	var scans []ScanSummary
 	if err := cursor.All(context.Background(), &scans); err != nil {
-		httpError(w, http.StatusInternalServerError, "failed to parse scans")
-		return
+		return nil, err
 	}
 	if scans == nil {
 		scans = []ScanSummary{}
 	}
-	jsonResponse(w, http.StatusOK, scans)
+	return scans, nil
 }
 
 // getScanHandler returns a single full scan by id.
@@ -170,7 +197,9 @@ func findScanByID(id primitive.ObjectID) (*Scan, error) {
 }
 
 func findLatestScans(n int64) ([]*Scan, error) {
-	opts := options.Find().SetSort(bson.D{{Key: "finished_at", Value: -1}}).SetLimit(n)
+	opts := options.Find().
+		SetSort(bson.D{{Key: "finished_at", Value: -1}, {Key: "_id", Value: -1}}).
+		SetLimit(n)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cursor, err := scanCol.Find(ctx, bson.M{}, opts)

@@ -27,6 +27,7 @@ func main() {
 	api.HandleFunc("/scans/progress", scanProgressHandler).Methods("GET")
 	api.HandleFunc("/scans/latest", latestScanHandler).Methods("GET")
 	api.HandleFunc("/scans/latest-diff", latestDiffHandler).Methods("GET")
+	api.HandleFunc("/scans/archive", listArchivedScansHandler).Methods("GET")
 	api.HandleFunc("/scans/compare", compareScansHandler).Methods("GET")
 	api.HandleFunc("/scans/{id}", getScanHandler).Methods("GET")
 

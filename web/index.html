@@ -28,8 +28,20 @@
     </section>
 
     <section id="history-section">
-      <h2>Scan history</h2>
+      <div class="section-head">
+        <h2>Scan history</h2>
+        <button id="archive-btn" class="secondary" type="button">Archived scans</button>
+      </div>
       <ul id="history" class="history"></ul>
+    </section>
+
+    <section id="archive-section" hidden>
+      <div class="section-head">
+        <h2>Archived scans</h2>
+        <button id="archive-back" class="secondary" type="button">Recent scans</button>
+      </div>
+      <p class="hint">These are kept so you can open them. They stay off the main screen.</p>
+      <ul id="archive" class="history"></ul>
     </section>
 
     <section id="detail-section" hidden>

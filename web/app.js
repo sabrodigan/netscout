@@ -88,6 +88,7 @@ async function runScan() {
     setStatus(`Scan complete: ${scan.hostCount} host(s) up on ${scan.cidr}.`);
     await loadPlaces().catch(() => {});
     await loadHistory();
+    if (!$("archive-section").hidden) await showArchive();
     showScan(scan);
   } catch (e) {
     setStatus(e.message, true);
@@ -98,28 +99,67 @@ async function runScan() {
   }
 }
 
-async function loadHistory() {
-  const scans = await api("GET", "/api/scans");
-  const ul = $("history");
-  ul.innerHTML = "";
+function scanRow(s) {
+  const li = document.createElement("li");
+  const span = document.createElement("span");
+  const strong = document.createElement("strong");
+  strong.textContent = s.cidr;
+  const meta = document.createElement("span");
+  meta.className = "meta";
+  meta.textContent = ` ${fmtTime(s.finishedAt)}`;
+  span.append(strong, meta);
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.textContent = `${s.hostCount} up`;
+  li.append(span, badge);
+  li.onclick = async () => {
+    try {
+      showScan(await api("GET", `/api/scans/${s.id}`));
+    } catch (e) {
+      setStatus(e.message, true);
+    }
+  };
+  return li;
+}
+
+function fillScanList(ul, scans, emptyText) {
+  ul.replaceChildren();
   if (!scans.length) {
-    ul.innerHTML = '<li class="empty">No scans yet — run one above.</li>';
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = emptyText;
+    ul.append(li);
     return;
   }
-  for (const s of scans) {
-    const li = document.createElement("li");
-    li.innerHTML = `
-      <span><strong>${s.cidr}</strong> <span class="meta">${fmtTime(s.finishedAt)}</span></span>
-      <span class="badge">${s.hostCount} up</span>`;
-    li.onclick = async () => {
-      try {
-        showScan(await api("GET", `/api/scans/${s.id}`));
-      } catch (e) {
-        setStatus(e.message, true);
-      }
-    };
-    ul.appendChild(li);
+  for (const s of scans) ul.append(scanRow(s));
+}
+
+async function loadHistory() {
+  const scans = await api("GET", "/api/scans");
+  fillScanList($("history"), scans, "No scans yet — run one above.");
+}
+
+async function showArchive() {
+  $("history-section").hidden = true;
+  $("archive-section").hidden = false;
+  const ul = $("archive");
+  ul.replaceChildren();
+  const waiting = document.createElement("li");
+  waiting.className = "empty";
+  waiting.textContent = "Loading archived scans…";
+  ul.append(waiting);
+  try {
+    const scans = await api("GET", "/api/scans/archive");
+    fillScanList(ul, scans, "Nothing is archived yet. Scans older than the latest 10 are kept here.");
+  } catch (e) {
+    setStatus(e.message, true);
+    fillScanList(ul, [], "Could not load the archive.");
   }
+}
+
+function showRecent() {
+  $("archive-section").hidden = true;
+  $("history-section").hidden = false;
 }
 
 async function showScan(scan) {
@@ -195,5 +235,7 @@ function renderDiff(diff) {
 
 $("run-btn").onclick = runScan;
 $("diff-btn").onclick = showLatestDiff;
+$("archive-btn").onclick = showArchive;
+$("archive-back").onclick = showRecent;
 loadPlaces().catch((e) => setStatus(e.message, true));
 loadHistory().catch((e) => setStatus(e.message, true));
