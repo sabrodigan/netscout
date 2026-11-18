@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"io/fs"
 	"log"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/gorilla/mux"
 )
+
+// build is the git commit this binary was built from.
+// go build -ldflags "-X main.build=$(git rev-parse --short HEAD)"
+var build = "dev"
 
 //go:embed web
 var webFS embed.FS
@@ -36,7 +41,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open embedded web assets: %v", err)
 	}
-	r.PathPrefix("/").Handler(http.FileServer(http.FS(static)))
+	r.PathPrefix("/").Handler(uiHandler(static))
 
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
@@ -53,4 +58,22 @@ func main() {
 	}
 	log.Printf("netscout listening on http://%s", addr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func uiHandler(static fs.FS) http.Handler {
+	files := http.FileServer(http.FS(static))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+			files.ServeHTTP(w, r)
+			return
+		}
+		page, err := fs.ReadFile(static, "index.html")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write(bytes.ReplaceAll(page, []byte("__BUILD__"), []byte(build)))
+	})
 }
